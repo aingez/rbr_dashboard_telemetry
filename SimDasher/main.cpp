@@ -1,6 +1,7 @@
 #include <iostream>
 #include <winsock2.h>
 #include <windows.h>
+#include <vector>
 #include <map>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -14,6 +15,20 @@ std::map<int, char> gear_map = {
     {-1, 'R'}, {0, 'N'}, {1, '1'}, {2, '2'}, {3, '3'},
     {4, '4'}, {5, '5'}, {6, '6'}, {7, '7'}, {8, '8'}
 };
+
+std::vector<std::string> getAvailableComPorts() {
+    std::vector<std::string> ports;
+    char targetPath[1024];
+
+    for (int i = 1; i <= 256; ++i) {
+        std::string portName = "COM" + std::to_string(i);
+        if (QueryDosDeviceA(portName.c_str(), targetPath, sizeof(targetPath))) {
+            ports.push_back(portName);
+        }
+    }
+
+    return ports;
+}
 
 bool InitWinsock() {
     WSADATA wsaData;
@@ -72,13 +87,9 @@ void Cleanup(SOCKET sock, HANDLE serial) {
     WSACleanup();
 }
 
-void clearScreen() {
-  #if defined(_WIN32) || defined(_WIN64)
-    system("cls");
-  #elif defined(__unix__) || defined(__APPLE__)
-    system("clear");
-  #endif
-}
+// void clearScreen() {
+//     system("cls");
+// }
 
 int main() {
     if (!InitWinsock()) {
@@ -94,15 +105,48 @@ int main() {
         return 1;
     }
     std::cout << "Created UDP Socket\n";
+    system("cls");
+    // COM port selection
+    std::vector<std::string> availablePorts = getAvailableComPorts();
+    HANDLE serial = INVALID_HANDLE_VALUE; 
 
-    HANDLE serial = InitSerialPort("COM4");
-    if (serial == INVALID_HANDLE_VALUE) {
-        std::cerr << "Failed to open serial port.\n";
-        Cleanup(sock, serial);
-        return 1;
+    if (availablePorts.empty()) {
+        std::cout << "No COM ports found. Please connect a device" << std::endl;
+        return 0;
+    } else {
+        std::cout << "Available COM ports:" << std::endl;
+        for (const std::string& port : availablePorts) {
+            std::cout << port << std::endl;
+        }
+
+        std::cout << "\nPlease select a COM port from the list above: ";
+        std::string selectedPort;
+        std::cin >> selectedPort;
+
+        bool valid = false;
+        for (const std::string& port : availablePorts) {
+            if (port == selectedPort) {
+                valid = true;
+                break;
+            }
+        }
+        system("cls");
+
+        if (!valid) {
+            std::cout << "Invalid selection. Exiting." << std::endl;
+            return 0;
+        }
+
+        serial = InitSerialPort(selectedPort); // use the outer serial variable
+        if (serial == INVALID_HANDLE_VALUE) {
+            std::cerr << "Failed to open serial port.\n";
+            Cleanup(sock, serial);
+            return 1;
+        }
+
+        std::cout << "Opened Serial Port " << selectedPort << " successfully\n";
     }
-    std::cout << "Open Serial Port Success\n";
-
+    system("cls");
     std::cout << "Listening for RBR telemetry and sending gear to Arduino...\n";
 
     char buffer[PACKET_BUFFER_SIZE];
@@ -110,7 +154,6 @@ int main() {
     int clientAddrLen = sizeof(clientAddr);
 
     while (true) {
-        // clearScreen();
         int bytesReceived = recvfrom(sock, buffer, sizeof(buffer), 0,
                                      (sockaddr*)&clientAddr, &clientAddrLen);
 
@@ -122,8 +165,6 @@ int main() {
         char gearChar = ParseGearFromPacket(buffer);
         DWORD bytesWritten;
         WriteFile(serial, &gearChar, 1, &bytesWritten, NULL);
-        // std::cout << "Gear: " << gearChar << "\n";
-        // std::cout << buffer;
     }
 
     Cleanup(sock, serial);
