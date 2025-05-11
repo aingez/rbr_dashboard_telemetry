@@ -36,19 +36,28 @@ struct RpmLedZone {
   uint32_t color;     // LED color
 };
 
+RpmLedZone rpmZones[] = {
+  {0.4, strip.Color(0, 255, 0)},     // Green zone (0%–40%)
+  {0.7, strip.Color(255, 165, 0)},   // Orange zone (40%–70%)
+  {1.0, strip.Color(255, 0, 0)}      // Red zone (70%–100%)
+};
+
 void showRPM(int rpm) {
   int ledCount = map(rpm, 0, MAX_RPM, 0, WS2812B_PIN_NUM_LEDS);
 
   for (int i = 0; i < WS2812B_PIN_NUM_LEDS; i++) {
     if (i < ledCount) {
-      // Color based on zone
-      if (i < WS2812B_PIN_NUM_LEDS * 0.4) {
-        strip.setPixelColor(i, strip.Color(0, 255, 0));   // Green zone
-      } else if (i < WS2812B_PIN_NUM_LEDS * 0.7) {
-        strip.setPixelColor(i, strip.Color(255, 165, 0)); // Orange zone
-      } else {
-        strip.setPixelColor(i, strip.Color(255, 0, 0));   // Red zone
+      float ledPos = (float)i / WS2812B_PIN_NUM_LEDS;
+      uint32_t color = strip.Color(255, 255, 255); // default fallback color
+
+      for (const auto& zone : rpmZones) {
+        if (ledPos <= zone.threshold) {
+          color = zone.color;
+          break;
+        }
       }
+
+      strip.setPixelColor(i, color);
     } else {
       strip.setPixelColor(i, 0); // Off
     }
@@ -56,7 +65,6 @@ void showRPM(int rpm) {
 
   strip.show();
 }
-
 
 void setup()
 {
@@ -85,16 +93,35 @@ void setup()
 
 void loop()
 {
-  if (Serial.available() > 0) {
+  if (Serial.available() >= 5) {
     char gear = Serial.read();
+
+    byte rpmBytes[4];
+    for (int i = 0; i < 4; i++) {
+      rpmBytes[i] = Serial.read();
+    }
+
+    // Promote bytes to uint32_t before shifting
+    uint32_t engineRPM = 
+        (uint32_t)rpmBytes[0] |
+        ((uint32_t)rpmBytes[1] << 8) |
+        ((uint32_t)rpmBytes[2] << 16) |
+        ((uint32_t)rpmBytes[3] << 24);
+
+    // If you want to store in int (usually 16-bit or 32-bit depending on MCU),
+    // cast carefully or use uint32_t if RPM can exceed 32767
+    int rpmValue = static_cast<int>(engineRPM);
+
     displayChar(gear);
-    lastUpdateTime = millis();  // Update the timer
-    displayCleared = false;     // Mark display as active
+    showRPM(rpmValue);
+
+    lastUpdateTime = millis();
+    displayCleared = false;
   }
 
-  // Check for inactivity timeout
   if (!displayCleared && (millis() - lastUpdateTime > timeoutDuration)) {
     clearDisplay();
-    displayCleared = true;      // Mark as cleared so we don't repeat
+    showRPM(0);
+    displayCleared = true;
   }
 }
