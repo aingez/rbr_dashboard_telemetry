@@ -3,6 +3,9 @@
 #include <windows.h>
 #include <vector>
 #include <map>
+#include <cmath>    // for std::round
+#include <cstdint>  // for uint8_t
+#include <cstring>  // for std::memcpy
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -75,6 +78,12 @@ HANDLE InitSerialPort(const std::string& portName) {
     return hSerial;
 }
 
+int extractIntBuffer (const char* buffer, uint16_t offset) {
+    float value;
+    std::memcpy(&value, buffer + offset, sizeof(float));
+    return static_cast<int>(std::round(value));
+}
+
 char ParseGearFromPacket(const char* buffer) {
     int gearRaw = *(int*)(buffer + GEAR_OFFSET);
     int gear = gearRaw - 1;
@@ -106,9 +115,9 @@ int main() {
     }
     std::cout << "Created UDP Socket\n";
     system("cls");
-    // COM port selection
+
     std::vector<std::string> availablePorts = getAvailableComPorts();
-    HANDLE serial = INVALID_HANDLE_VALUE; 
+    HANDLE serial = INVALID_HANDLE_VALUE;
 
     if (availablePorts.empty()) {
         std::cout << "No COM ports found. Please connect a device" << std::endl;
@@ -137,7 +146,7 @@ int main() {
             return 0;
         }
 
-        serial = InitSerialPort(selectedPort); // use the outer serial variable
+        serial = InitSerialPort(selectedPort);
         if (serial == INVALID_HANDLE_VALUE) {
             std::cerr << "Failed to open serial port.\n";
             Cleanup(sock, serial);
@@ -147,7 +156,7 @@ int main() {
         std::cout << "Opened Serial Port " << selectedPort << " successfully\n";
     }
     system("cls");
-    std::cout << "Listening for RBR telemetry and sending gear to Arduino...\n";
+    std::cout << "Listening for RBR telemetry and sending gear and RPM to Arduino...\n";
 
     char buffer[PACKET_BUFFER_SIZE];
     sockaddr_in clientAddr{};
@@ -163,8 +172,21 @@ int main() {
         }
 
         char gearChar = ParseGearFromPacket(buffer);
-        DWORD bytesWritten;
-        WriteFile(serial, &gearChar, 1, &bytesWritten, NULL);
+        int engineRPM = extractIntBuffer(buffer, 136);
+
+        // Prepare buffer to hold gearChar + engineRPM
+        char sendBuffer[1 + sizeof(int)];
+        sendBuffer[0] = gearChar;
+        std::memcpy(sendBuffer + 1, &engineRPM, sizeof(engineRPM));
+
+        DWORD bytesWritten = 0;
+        BOOL success = WriteFile(serial, sendBuffer, sizeof(sendBuffer), &bytesWritten, NULL);
+
+        if (!success) {
+            std::cerr << "Failed to write to serial port.\n";
+        } else if (bytesWritten != sizeof(sendBuffer)) {
+            std::cerr << "Warning: incomplete write to serial port.\n";
+        }
     }
 
     Cleanup(sock, serial);
