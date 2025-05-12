@@ -6,3 +6,7 @@
 Directory
 - SimDash_ArduinoProMicro : PlatformIO Project for arduino (using clone Pro Micro)
 - SimDasher : C++ to repeat the telemetry
+
+## Schematics
+
+![Untitled Sketch 3_bb](https://github.com/user-attachments/assets/1cb4a68a-9ca8-4552-9a70-536fedd52ddb)
