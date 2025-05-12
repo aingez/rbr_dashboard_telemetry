@@ -43,12 +43,20 @@ RpmLedZone rpmZones[] = {
 };
 
 void showRPM(int rpm) {
+  static int lastLedCount = -1;
+
   int ledCount = map(rpm, 0, MAX_RPM, 0, WS2812B_PIN_NUM_LEDS);
+
+  // Only update if the visual state actually changes
+  if (ledCount == lastLedCount) {
+    return;
+  }
+  lastLedCount = ledCount;
 
   for (int i = 0; i < WS2812B_PIN_NUM_LEDS; i++) {
     if (i < ledCount) {
       float ledPos = (float)i / WS2812B_PIN_NUM_LEDS;
-      uint32_t color = strip.Color(255, 255, 255); // default fallback color
+      uint32_t color = strip.Color(255, 255, 255); // fallback color
 
       for (const auto& zone : rpmZones) {
         if (ledPos <= zone.threshold) {
@@ -66,36 +74,34 @@ void showRPM(int rpm) {
   strip.show();
 }
 
+
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(250000);
 
   strip.begin();
   strip.show();
 
   setupMAX7219();
-  char start_text[3] = {'A', 'G', 'Z'};
-  for (size_t i = 0; i < sizeof(start_text)/sizeof(start_text[0]); i++) {
-    displayChar(start_text[i]);
-    delay(300);
-    clearDisplay();
-    delay(50);
-  }
-  clearDisplay();
-
   strip.setBrightness(128);  
+  
   for (unsigned int i = 0; i <= MAX_RPM; i += (MAX_RPM / 3)) {
+    displayChar('X');
     showRPM(i);
     delay(200);
-  }
+    clearDisplay();
+  }  
   showRPM(0);
 }
 
 void loop()
 {
+  // atleast 5B
   if (Serial.available() >= 5) {
+    // 1B Gear
     char gear = Serial.read();
 
+    // 4B RPM
     byte rpmBytes[4];
     for (int i = 0; i < 4; i++) {
       rpmBytes[i] = Serial.read();
@@ -108,17 +114,14 @@ void loop()
         ((uint32_t)rpmBytes[2] << 16) |
         ((uint32_t)rpmBytes[3] << 24);
 
-    // If you want to store in int (usually 16-bit or 32-bit depending on MCU),
-    // cast carefully or use uint32_t if RPM can exceed 32767
-    int rpmValue = static_cast<int>(engineRPM);
-
     displayChar(gear);
-    showRPM(rpmValue);
+    showRPM(engineRPM);
 
     lastUpdateTime = millis();
     displayCleared = false;
   }
 
+  // timeout
   if (!displayCleared && (millis() - lastUpdateTime > timeoutDuration)) {
     clearDisplay();
     showRPM(0);

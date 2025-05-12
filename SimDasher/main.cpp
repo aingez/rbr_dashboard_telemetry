@@ -6,11 +6,14 @@
 #include <cmath>    // for std::round
 #include <cstdint>  // for uint8_t
 #include <cstring>  // for std::memcpy
+#include <thread>       // For std::thread
+#include <mutex>        // For std::mutex
+#include <condition_variable>  // For thread synchronization (optional)
 
 #pragma comment(lib, "ws2_32.lib")
 
 #define UDP_PORT 6776
-#define SERIAL_BAUDRATE CBR_9600
+#define SERIAL_BAUDRATE 250000
 #define PACKET_BUFFER_SIZE 1024
 #define GEAR_OFFSET 44
 
@@ -18,6 +21,73 @@ std::map<int, char> gear_map = {
     {-1, 'R'}, {0, 'N'}, {1, '1'}, {2, '2'}, {3, '3'},
     {4, '4'}, {5, '5'}, {6, '6'}, {7, '7'}, {8, '8'}
 };
+
+std::mutex dataMutex;          // Mutex to protect shared data
+char gearChar = 'N';           // Shared gear data
+int engineRPM = 0;             // Shared RPM data
+bool dataReady = false;        // Flag to indicate when new data is available
+
+int extractIntBuffer(const char* buffer, uint16_t offset);
+char ParseGearFromPacket(const char* buffer);
+void receiveUdpPackets(SOCKET sock) {
+    char buffer[PACKET_BUFFER_SIZE];
+    sockaddr_in clientAddr{};
+    int clientAddrLen = sizeof(clientAddr);
+
+    while (true) {
+        int bytesReceived = recvfrom(sock, buffer, sizeof(buffer), 0, 
+                                     (sockaddr*)&clientAddr, &clientAddrLen);
+
+        if (bytesReceived == SOCKET_ERROR) {
+            std::cerr << "recvfrom failed.\n";
+            continue;
+        }
+
+        // Parse data (gear and RPM)
+        char newGearChar = ParseGearFromPacket(buffer);
+        int newEngineRPM = extractIntBuffer(buffer, 136);
+
+        // Lock the mutex and update the shared data
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+            gearChar = newGearChar;
+            engineRPM = newEngineRPM;
+            dataReady = true;  // Data is ready to be sent
+        }
+
+        // Optional: Log data (for debugging)
+        // std::cout << "Received Gear: " << gearChar << " RPM: " << engineRPM << std::endl;
+    }
+}
+
+void sendToArduino(HANDLE serial) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+            if (dataReady) {
+                // Prepare data to send
+                char sendBuffer[1 + sizeof(int)];
+                sendBuffer[0] = gearChar;
+                std::memcpy(sendBuffer + 1, &engineRPM, sizeof(engineRPM));
+
+                // Write data to serial
+                DWORD bytesWritten = 0;
+                BOOL success = WriteFile(serial, sendBuffer, sizeof(sendBuffer), &bytesWritten, NULL);
+
+                if (!success) {
+                    std::cerr << "Failed to write to serial port.\n";
+                } else if (bytesWritten != sizeof(sendBuffer)) {
+                    std::cerr << "Warning: incomplete write to serial port.\n";
+                }
+
+                dataReady = false;  // Data has been sent, reset flag
+            }
+        }
+
+        // Optional: Sleep to prevent busy-waiting (reduce CPU usage)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
 
 std::vector<std::string> getAvailableComPorts() {
     std::vector<std::string> ports;
@@ -96,10 +166,6 @@ void Cleanup(SOCKET sock, HANDLE serial) {
     WSACleanup();
 }
 
-// void clearScreen() {
-//     system("cls");
-// }
-
 int main() {
     if (!InitWinsock()) {
         std::cerr << "Failed to initialize Winsock.\n";
@@ -114,7 +180,6 @@ int main() {
         return 1;
     }
     std::cout << "Created UDP Socket\n";
-    system("cls");
 
     std::vector<std::string> availablePorts = getAvailableComPorts();
     HANDLE serial = INVALID_HANDLE_VALUE;
@@ -139,7 +204,6 @@ int main() {
                 break;
             }
         }
-        system("cls");
 
         if (!valid) {
             std::cout << "Invalid selection. Exiting." << std::endl;
@@ -155,39 +219,14 @@ int main() {
 
         std::cout << "Opened Serial Port " << selectedPort << " successfully\n";
     }
-    system("cls");
-    std::cout << "Listening for RBR telemetry and sending gear and RPM to Arduino...\n";
 
-    char buffer[PACKET_BUFFER_SIZE];
-    sockaddr_in clientAddr{};
-    int clientAddrLen = sizeof(clientAddr);
+    // Start the UDP and serial threads
+    std::thread udpThread(receiveUdpPackets, sock);
+    std::thread serialThread(sendToArduino, serial);
 
-    while (true) {
-        int bytesReceived = recvfrom(sock, buffer, sizeof(buffer), 0,
-                                     (sockaddr*)&clientAddr, &clientAddrLen);
-
-        if (bytesReceived == SOCKET_ERROR) {
-            std::cerr << "recvfrom failed.\n";
-            continue;
-        }
-
-        char gearChar = ParseGearFromPacket(buffer);
-        int engineRPM = extractIntBuffer(buffer, 136);
-
-        // Prepare buffer to hold gearChar + engineRPM
-        char sendBuffer[1 + sizeof(int)];
-        sendBuffer[0] = gearChar;
-        std::memcpy(sendBuffer + 1, &engineRPM, sizeof(engineRPM));
-
-        DWORD bytesWritten = 0;
-        BOOL success = WriteFile(serial, sendBuffer, sizeof(sendBuffer), &bytesWritten, NULL);
-
-        if (!success) {
-            std::cerr << "Failed to write to serial port.\n";
-        } else if (bytesWritten != sizeof(sendBuffer)) {
-            std::cerr << "Warning: incomplete write to serial port.\n";
-        }
-    }
+    // Join the threads to wait for them to finish
+    udpThread.join();
+    serialThread.join();
 
     Cleanup(sock, serial);
     return 0;
