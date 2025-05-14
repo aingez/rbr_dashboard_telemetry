@@ -83,7 +83,7 @@ void setup()
   strip.show();
 
   setupMAX7219();
-  strip.setBrightness(128);  
+  strip.setBrightness(8);  
   
   for (unsigned int i = 0; i <= MAX_RPM; i += (MAX_RPM / 3)) {
     displayChar('X');
