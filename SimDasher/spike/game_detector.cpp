@@ -7,27 +7,28 @@
 #include <optional>
 
 std::optional<std::wstring> GetRunningGameName(const std::vector<std::wstring>& gameNames) {
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0); // create running process snapshot
     if (hSnapshot == INVALID_HANDLE_VALUE) return std::nullopt;
 
     PROCESSENTRY32W processEntry;
     processEntry.dwSize = sizeof(PROCESSENTRY32W);
 
-    if (Process32FirstW(hSnapshot, &processEntry)) {
+    if (Process32FirstW(hSnapshot, &processEntry)) { // iteration
         do {
-            for (const std::wstring& name : gameNames) {
+            for (const std::wstring& name : gameNames) { // matching the snapshot to gameList
                 if (name == processEntry.szExeFile) {
-                    CloseHandle(hSnapshot);
-                    return processEntry.szExeFile;
+                    CloseHandle(hSnapshot); // clean up and return process
+                    return processEntry.szExeFile; 
                 }
             }
-        } while (Process32NextW(hSnapshot, &processEntry));
+        } while (Process32NextW(hSnapshot, &processEntry)); 
     }
 
-    CloseHandle(hSnapshot);
+    CloseHandle(hSnapshot); // cleanup no match, return null
     return std::nullopt;
 }
 
+// List of game process name
 std::vector<std::wstring> gameList = {
     L"acs.exe",      // AC
     L"RichardBurnsRally_SSE.exe", // RBR
