@@ -14,12 +14,14 @@ void Cleanup(SOCKET sock, HANDLE serial) {
 }
 
 int main() {
+    // init windsock
     if (!InitWinsock()) {
         std::cerr << "Failed to initialize Winsock.\n";
         return 1;
     }
     std::cout << "Initialized Winsock\n";
 
+    // init UDP Socket
     SOCKET sock = CreateUdpSocket();
     if (sock == INVALID_SOCKET) {
         std::cerr << "Failed to create UDP socket.\n";
@@ -27,46 +29,14 @@ int main() {
         return 1;
     }
     std::cout << "Created UDP Socket\n";
-
-    std::vector<std::string> availablePorts = getAvailableComPorts();
-    HANDLE serial = INVALID_HANDLE_VALUE;
-
-    if (availablePorts.empty()) {
-        std::cout << "No COM ports found. Please connect a device" << std::endl;
-        return 0;
-    } else {
-        std::cout << "Available COM ports:" << std::endl;
-        for (const std::string& port : availablePorts) {
-            std::cout << port << std::endl;
-        }
-
-        std::cout << "\nPlease select a COM port from the list above: ";
-        std::string selectedPort;
-        std::cin >> selectedPort;
-
-        bool valid = false;
-        for (const std::string& port : availablePorts) {
-            if (port == selectedPort) {
-                valid = true;
-                break;
-            }
-        }
-
-        if (!valid) {
-            std::cout << "Invalid selection. Exiting." << std::endl;
-            return 0;
-        }
-
-        serial = InitSerialPort(selectedPort);
-        if (serial == INVALID_HANDLE_VALUE) {
-            std::cerr << "Failed to open serial port.\n";
-            Cleanup(sock, serial);
-            return 1;
-        }
-
-        std::cout << "Opened Serial Port " << selectedPort << " successfully\n";
+    
+    // get COM port
+    HANDLE serial = SelectAndOpenSerialPort();
+    if (serial == INVALID_HANDLE_VALUE) {
+        Cleanup(sock, serial);
+        return 1;
     }
-
+    
     // Start the UDP and serial threads
     std::thread udpThread(receiveUdpPackets, sock);
     std::thread serialThread(sendToArduino, serial);

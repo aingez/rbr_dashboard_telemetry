@@ -9,10 +9,10 @@
 #include <mutex>
 #include <winsock2.h>
 
-#define GEAR_OFFSET 44
+// #define GEAR_OFFSET 44
 
 // Local gear mapping table
-static std::map<int, char> gear_map = {
+static std::map<int, char> rbr_gear_map = {
     {-1, 'R'}, {0, 'N'}, {1, '1'}, {2, '2'}, {3, '3'},
     {4, '4'}, {5, '5'}, {6, '6'}, {7, '7'}, {8, '8'}
 };
@@ -52,7 +52,7 @@ int extractIntBuffer(const char* buffer, uint16_t offset) {
 char ParseGearFromPacket(const char* buffer) {
     int gearRaw = *(int*)(buffer + GEAR_OFFSET);
     int gear = gearRaw - 1;
-    return gear_map.count(gear) ? gear_map[gear] : 'N';
+    return rbr_gear_map.count(gear) ? rbr_gear_map[gear] : 'N';
 }
 
 // Main UDP receiving loop
